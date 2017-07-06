@@ -20,34 +20,18 @@ from collections import deque
 import logging.handlers
 
 # hyperparameters
-# EPISODE_NUM = 5000000
-TRAIN_STEP_NUM = 100000000
-# PURE_EXPLORE_NUM = 100000
-PURE_EXPLORE_NUM = 100000
-INITIAL_EPSILON = 1 # starting value of epsilon after PURE_EXPLORE_NUM
-FINAL_EPSILON = 0.1
-EPSILON_DECAY_SLOPE = 1e-6
-# EPSILON_DECAY_RATE = 1-1e-5 # final value of epsilon
-REWARD_SUM_BATCH_SIZE = 100
+EPISODE_NUM = 100000000
+EPISODE_BATCH_SIZE = 1000
 SAVE_INTERVAL = 1000000
-# EPOCH_NUM_PER_EPISODE = 100
-# GAMMA = 0.99 # discount factor for reward
-GAMMA = 1 # discount factor for reward
+GAMMA = 0.99 # discount factor for reward
+# GAMMA = 1 # discount factor for reward
 LEARNING_RATE = 1e-4 # feel free to play with this to train faster or more stably.
 # ACTION_NUM = 18
 ACTION_NUM = 9
-PIC_CHANNEL = 1
-CONV_LAYER_WIDTH = 32
-FC_LAYER_WIDTH = 512
-
-REPLAY_BUFFER_SIZE = 100000 # number of previous transitions to remember
-# OBSERVE_BATCH_SIZE = 3200. # timesteps to observe before training
-OBSERVE_BATCH_SIZE = 10. # points to observe before training
-SGD_BATCH_SIZE = 32 # size of minibatch
 
 CKPT_DIR = 'model'
 LOG_DIR = 'log'
-SUMMARY_DIR = 'summary/run070416'
+SUMMARY_DIR = 'summary/run070614'
 
 MAX_LOG_SIZE = 2560000
 LOG_BACKUP_NUM = 4000
@@ -103,24 +87,22 @@ loss = -tf.reduce_mean(log_likelihood * advantage)
 tf.summary.histogram('log_likelihood', log_likelihood)
 tf.summary.scalar('loss', loss)
 
-train_step = tf.train.AdamOptimizer(LEARNING_RATE).minimize(loss)
-
-# adam = tf.train.AdamOptimizer(learning_rate=LEARNING_RATE) # Our optimizer
-# trained_var = tf.trainable_variables()
-# new_grad = tf.gradients(loss, trained_var)
-# W_conv1_grad = tf.placeholder(tf.float32, name="W_conv_grad1")
-# b_conv1_grad = tf.placeholder(tf.float32, name="b_conv_grad1")
-# W_conv2_grad = tf.placeholder(tf.float32, name="W_conv_grad2")
-# b_conv2_grad = tf.placeholder(tf.float32, name="b_conv_grad2")
-# W_conv3_grad = tf.placeholder(tf.float32, name="W_conv_grad3")
-# b_conv3_grad = tf.placeholder(tf.float32, name="b_conv_grad3")
-# W_fc_grad = tf.placeholder(tf.float32, name="W_fc_grad")
-# b_fc_grad = tf.placeholder(tf.float32, name="b_fc_grad")
-# W_output_grad = tf.placeholder(tf.float32, name="W_output_grad")
-# b_output_grad = tf.placeholder(tf.float32, name="b_output_grad")
-# batch_grad = [W_conv1_grad, b_conv1_grad, W_conv2_grad, b_conv2_grad, W_conv3_grad, b_conv3_grad, W_fc_grad, b_fc_grad, W_output_grad, b_output_grad]
-# update_grad = adam.apply_gradients(zip(batch_grad, trained_var))
-
+# train_step = tf.train.AdamOptimizer(LEARNING_RATE).minimize(loss)
+adam = tf.train.AdamOptimizer(learning_rate=LEARNING_RATE) # Our optimizer
+trained_var = tf.trainable_variables()
+new_grad = tf.gradients(loss, trained_var)
+W_conv1_grad = tf.placeholder(tf.float32, name="W_conv_grad1")
+b_conv1_grad = tf.placeholder(tf.float32, name="b_conv_grad1")
+W_conv2_grad = tf.placeholder(tf.float32, name="W_conv_grad2")
+b_conv2_grad = tf.placeholder(tf.float32, name="b_conv_grad2")
+W_conv3_grad = tf.placeholder(tf.float32, name="W_conv_grad3")
+b_conv3_grad = tf.placeholder(tf.float32, name="b_conv_grad3")
+W_fc_grad = tf.placeholder(tf.float32, name="W_fc_grad")
+b_fc_grad = tf.placeholder(tf.float32, name="b_fc_grad")
+W_output_grad = tf.placeholder(tf.float32, name="W_output_grad")
+b_output_grad = tf.placeholder(tf.float32, name="b_output_grad")
+batch_grad = [W_conv1_grad, b_conv1_grad, W_conv2_grad, b_conv2_grad, W_conv3_grad, b_conv3_grad, W_fc_grad, b_fc_grad, W_output_grad, b_output_grad]
+update_grad = adam.apply_gradients(zip(batch_grad, trained_var))
 
 # preprocess the screen image
 def preprocess(processed_input):
@@ -158,22 +140,8 @@ def map_action_from_label_to_env(from_act):
         to_act = from_act + 9
     return to_act
 
-def sample(distribution, train_no):
-    # act = np.random.choice(ACTION_NUM, p=distribution)
-    act = np.random.randint(0, ACTION_NUM)
-    if train_no >= PURE_EXPLORE_NUM:
-        # epsilon = INITIAL_EPSILON * (EPSILON_DECAY_RATE ** (train_no/10000))
-        epsilon = INITIAL_EPSILON - EPSILON_DECAY_SLOPE * train_no
-        if epsilon < FINAL_EPSILON:
-            epsilon = FINAL_EPSILON
-        # if step_i%10000 == 0:
-        #     logger.debug('play episode %d, step %d, train epoch %d, epsilon %s' % (episode_i, step_i, train_no, epsilon))
-        rand = np.random.random()
-        if rand > epsilon:
-            optimal_act = np.argmax(distribution)
-            # convert type from numpy.int64 to native python int
-            act = np.asscalar(optimal_act)
-
+def sample(distribution):
+    act = np.random.choice(ACTION_NUM, p=distribution)
     env_act = map_action_from_label_to_env(act)
     return act, env_act
 
@@ -200,30 +168,7 @@ def discount_rewards(rewards_):
     # print "discounted_r: ", discounted_r
     return discounted_r
 
-def put_buffer(features_, labels_, returns_):
-    for index in range(len(features_)):
-        replay_buffer.append((features_[index], labels_[index], returns_[index]))
-        if len(replay_buffer) > REPLAY_BUFFER_SIZE:
-            replay_buffer.popleft()
-
-def get_buffer():
-    _minibatch = random.sample(replay_buffer, SGD_BATCH_SIZE)
-
-    _minibatch_feature = np.zeros((SGD_BATCH_SIZE, 84, 84, 4))  # 32,84,84,4
-    _minibatch_label = np.zeros((SGD_BATCH_SIZE, ACTION_NUM))  # 32,18
-    _minibatch_return = np.zeros(SGD_BATCH_SIZE)
-
-    # now we do the experience replay
-    for index in range(0, len(_minibatch)):
-        _minibatch_feature[index] = _minibatch[index][0]
-        _minibatch_label[index] = _minibatch[index][1]  # this is the action
-        _minibatch_return[index] = _minibatch[index][2]
-
-    return _minibatch_feature, _minibatch_label, _minibatch_return
-
 episode_i = 0
-train_i = 0
-step_i = 0
 done = False
 reward = 0.0
 observations, actions, rewards = [],[],[]
@@ -246,17 +191,14 @@ with tf.Session(config = config) as sess:
     sess.run(init)
     file_writer = tf.summary.FileWriter(SUMMARY_DIR, sess.graph)
 
-    # Reset the gradient placeholder. We will collect gradients in
-    # gradBuffer until we are ready to update our policy network.
-    # grad_buffer = sess.run(trained_var)
-    # for index, grad in enumerate(grad_buffer):
-    #     grad_buffer[index] = grad * 0
+    # Reset the gradient placeholder. We will collect gradients in grad_buffer until we are ready to update our policy network.
+    grad_buffer = sess.run(trained_var)
+    for index, grad in enumerate(grad_buffer):
+        grad_buffer[index] = grad * 0
 
     saver = tf.train.Saver()
 
-    # TODO: only insert transition whose reward is 1
-    # while episode_i < EPISODE_NUM:
-    while train_i < TRAIN_STEP_NUM:
+    while episode_i < EPISODE_NUM:
         # tennis unit: set, game, point
         # change default episode from one set to one point
         while (reward == 0.0):
@@ -266,83 +208,56 @@ with tf.Session(config = config) as sess:
             stacked_obs = np.append(stacked_obs[:, :, :, 1:], processed_obs, axis=3)
             observations.append(stacked_obs)
             action_distribution = sess.run(output_actv, feed_dict={feature_observation: stacked_obs}) # predict
-            action, env_action = sample(np.reshape(action_distribution, [ACTION_NUM]), train_i)  # action_distribution if of [1, ACTION_NUM]
+            action, env_action = sample(np.reshape(action_distribution, [ACTION_NUM]))  # action_distribution if of [1, ACTION_NUM]
             one_hot_action = one_hot_encode_label(action)
             actions.append(one_hot_action)
             observation, reward, done, info = env.step(env_action)
             rewards.append(reward)
             # logger.debug('action: %d, %d, reward: %d, done: %r' % (action, env_action, reward, done))
             reward_sum += reward
-            step_i += 1
 
         returns = discount_rewards(rewards)
-        if reward == 1:
-            put_buffer(observations, actions, returns)
-            # logger.debug("episode %d, replay_buffer length %s" % (episode_i, len(replay_buffer)))
 
-        for _ in range(len(replay_buffer)/(SGD_BATCH_SIZE*100)):
-            # matrix_grad, summary = sess.run([new_grad, merged], feed_dict={feature_observation: matrix_feature,
-            #                                             label_action: matrix_label,
-            #                                             advantage: vector_return})
+        minibatch_feature = np.vstack(observations)
+        # logger.debug('minibatch_feature: %s' % (minibatch_feature))
+        minibatch_label = np.vstack(actions)
+        minibatch_return = np.vstack(returns)
 
-            # for index, grad in enumerate(matrix_grad):
-            #     grad_buffer[index] += grad
-            #     logger.debug("grad_buffer[%d]: %s"
-            #                 % (index, grad_buffer))
-            #
-            # curr_W_conv1, curr_b_conv1, curr_W_conv2, curr_b_conv2, curr_W_conv3, curr_b_conv3, \
-            # curr_W_fc, curr_b_fc, curr_W_output, curr_b_output, curr_loglik, curr_loss \
-            #     = sess.run([W_conv1, b_conv1, W_conv2, b_conv2, W_conv3, b_conv3, W_fc, b_fc, W_output, b_output, log_likelihood, loss],
-            #                                      {feature_observation: matrix_feature,
-            #                                       label_action: matrix_label,
-            #                                       advantage: vector_return})
-            # logger.debug("W_conv1: %s, b_conv1: %s, W_conv2: %s, b_conv2: %s, W_conv3: %s, b_conv3: %s, \
-            #              W_fc: %s, b_fc: %s, W_output: %s, b_output:%s, loglik: %s, loss: %s"
-            #       % (curr_W_conv1, curr_b_conv1, curr_W_conv2, curr_b_conv2, curr_W_conv3, curr_b_conv3,
-            #          curr_W_fc, curr_b_fc, curr_W_output, curr_b_output, curr_loglik, curr_loss))
+        matrix_grad, summary, cur_loglik, cur_loss = sess.run([new_grad, merged, log_likelihood, loss], feed_dict={feature_observation: minibatch_feature,
+                                                    label_action: minibatch_label,
+                                                    advantage: minibatch_return})
 
-            # sess.run(update_grad, feed_dict={W_conv1_grad: grad_buffer[0], b_conv1_grad: grad_buffer[1],
-            #                                  W_conv2_grad: grad_buffer[2], b_conv2_grad: grad_buffer[3],
-            #                                  W_conv3_grad: grad_buffer[4], b_conv3_grad: grad_buffer[5],
-            #                                  W_fc_grad: grad_buffer[6], b_fc_grad: grad_buffer[7],
-            #                                  W_output_grad: grad_buffer[8], b_output_grad: grad_buffer[9]})
-            #
-            # for index, grad in enumerate(grad_buffer):
-            #     grad_buffer[index] = grad * 0
+        for index, grad in enumerate(matrix_grad):
+            grad_buffer[index] += grad
+            # logger.debug("grad_buffer[%d]: %s" % (index, grad_buffer))
 
-            minibatch_feature, minibatch_label, minibatch_return = get_buffer()
-            # _, summary, cur_y, cur_loglik, cur_loss = sess.run([train_step, merged, output_actv, log_likelihood, loss], feed_dict={feature_observation: minibatch_feature,
-            #                                                            label_action: minibatch_label,
-            #                                                            advantage: minibatch_return})
-            _, summary, cur_loss = sess.run([train_step, merged, loss], feed_dict={feature_observation: minibatch_feature,
-                                                                          label_action: minibatch_label,
-                                                                          advantage: minibatch_return})
-            if (train_i % 10000 == 0):
-                file_writer.add_summary(summary, train_i)
-                # logger.debug("minibatch_label: %s" % (minibatch_label))
-                # logger.debug("minibatch_return: %s" % (minibatch_return))
-                # logger.warn('epoch %d, y %s, log_likelihood, %s, loss %s' % (train_i, cur_y, cur_loglik, cur_loss))
-                logger.warn('play episode %d, train epoch %d, buffer length %d, loss %s, ' % (episode_i, train_i, len(replay_buffer), cur_loss))
+        if episode_i % EPISODE_BATCH_SIZE == (EPISODE_BATCH_SIZE - 1):
+            sess.run(update_grad, feed_dict={W_conv1_grad: grad_buffer[0], b_conv1_grad: grad_buffer[1],
+                                             W_conv2_grad: grad_buffer[2], b_conv2_grad: grad_buffer[3],
+                                             W_conv3_grad: grad_buffer[4], b_conv3_grad: grad_buffer[5],
+                                             W_fc_grad: grad_buffer[6], b_fc_grad: grad_buffer[7],
+                                             W_output_grad: grad_buffer[8], b_output_grad: grad_buffer[9]})
 
-            if train_i % SAVE_INTERVAL == (SAVE_INTERVAL - 1):
-                logger.warn('save model at epoch %d' % (train_i))
-                ckpt_file = os.path.join(CKPT_DIR, 'pg_tennis_model')
-                saver.save(sess, ckpt_file, (train_i + 1) / SAVE_INTERVAL)
+            for index, grad in enumerate(grad_buffer):
+                grad_buffer[index] = grad * 0
 
-            train_i += 1
-
-        if episode_i % REWARD_SUM_BATCH_SIZE == (REWARD_SUM_BATCH_SIZE - 1):
-            logger.warn('Average reward for episode %d: %f' % (episode_i, reward_sum / REWARD_SUM_BATCH_SIZE))
+            file_writer.add_summary(summary, episode_i)
+            logger.warn('episode %d, loglik %s, loss %s, average reward %f' % (episode_i, cur_loglik, cur_loss, reward_sum / EPISODE_BATCH_SIZE))
             if reward_sum > 0:
                 logger.warn('Task solved in %d episodes!' % (episode_i))
             reward_sum = 0
 
+        if episode_i % SAVE_INTERVAL == (SAVE_INTERVAL - 1):
+            logger.warn('save model at epoch %d' % (episode_i))
+            ckpt_file = os.path.join(CKPT_DIR, 'pg_tennis_model')
+            saver.save(sess, ckpt_file, (episode_i + 1) / SAVE_INTERVAL)
+
         episode_i += 1
         reward = 0.0
+        stacked_obs = np.zeros([1, 84, 84, 4])
         if done:
             done = False
             observation = env.reset()
-            stacked_obs = np.zeros([1, 84, 84, 4])
         observations, actions, rewards = [], [], []  # reset array memory
 
 env.close()

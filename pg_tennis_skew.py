@@ -237,7 +237,7 @@ init = tf.global_variables_initializer()
 
 # Launch the graph
 config = tf.ConfigProto()
-config.gpu_options.allow_growth = True
+config.gpu_options.allow_growth = TrueEPISODE_NUM
 # config.log_device_placement = True
 with tf.Session(config = config) as sess:
     sess.run(init)
